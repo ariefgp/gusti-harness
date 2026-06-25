@@ -32,6 +32,33 @@ and the failure path self-corrects in a way that exercises the verifier loop.
 Durability comes from a LangGraph checkpointer keyed by `thread_id`: kill the
 process mid-run and re-invoke with the same id to resume from the last checkpoint.
 
+## Crash + resume
+
+Every run is keyed by `thread_id == run_id` and checkpointed to SQLite after each
+committed super-step. Re-invoking the same `run_id` resumes from the last durable
+checkpoint:
+
+```bash
+# Run, simulating a kill -9 right after the first file is durably committed:
+HARNESS_CRASH_AFTER_TASK=1 python -m src.cli run "file://$PWD/test-repo" --run-id demo
+# -> crashes (exit 137) with task 0 done and checkpointed
+
+# Resume with the SAME run_id — planner is skipped, task 0 is skipped:
+python -m src.cli run "file://$PWD/test-repo" --run-id demo
+# -> "resuming from last checkpoint (planner skipped)" -> status=done
+```
+
+**Cost-on-resume controls:**
+- The **plan is generated once** and persisted, so the Planner never re-runs.
+- `current_task_index` advances only after a file passes verification, so resume
+  **skips completed files** — no duplicate edits, no duplicate tokens.
+- The **3-iteration hard cap** per file bounds worst-case token spend (→ abort).
+
+> Note (LangGraph 1.x): `stream()` yields a step's update *before* its checkpoint
+> commits, so the durable checkpoint lags one super-step. The crash demo arms on
+> the advancing verifier and exits on the *next* boundary to land on a clean,
+> fully-committed state. See `src/cli.py`.
+
 ## Quick start
 
 ```bash

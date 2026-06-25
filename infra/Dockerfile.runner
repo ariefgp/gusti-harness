@@ -1,0 +1,17 @@
+# The sandboxed test-runner image. Runs the verifier command (pytest/ruff) for a
+# single run inside an isolated, non-root container. The harness launches it with
+# `--network none --read-only --user 1000:1000` and only the run's workdir mounted
+# at /work — so a run can neither reach the network nor touch another run's files.
+FROM python:3.11-slim
+
+# Test/lint deps for the validation niche. Pinned-ish; lock at build time.
+RUN pip install --no-cache-dir \
+    pytest \
+    ruff \
+    fastapi \
+    "pydantic[email]" \
+    httpx
+
+# Non-root by default (defense in depth; also enforced at `docker run` time).
+USER 1000:1000
+WORKDIR /work

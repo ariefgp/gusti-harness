@@ -20,6 +20,10 @@ DEFAULT_VERIFY_CMD = "python -m pytest -q"
 def verify_node(state: RunState) -> dict:
     cmd = os.getenv("VERIFY_CMD", DEFAULT_VERIFY_CMD)
     result = run_in_sandbox(state["workdir"], cmd=cmd)
+    if os.getenv("HARNESS_FORCE_FAIL"):
+        # Cap-trip switch: force the verifier to reject, driving the 3-iteration
+        # abort + rollback path (for the forced-failure demo).
+        result = result.__class__(ok=False, out=result.out, err="forced failure (HARNESS_FORCE_FAIL)")
     it = state["iteration"]
     fb = {
         "iteration": it,

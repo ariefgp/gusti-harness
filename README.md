@@ -59,6 +59,39 @@ python -m src.cli run "file://$PWD/test-repo" --run-id demo
 > the advancing verifier and exits on the *next* boundary to land on a clean,
 > fully-committed state. See `src/cli.py`.
 
+## Sandbox, isolation & rollback
+
+Two layers of containment:
+
+1. **Path-guarding (always on).** The Executor's FS tools resolve every path under
+   the run's workdir and reject traversal (`fs_tools.safe_path`). The agent cannot
+   read or write outside its own directory.
+2. **Container isolation (the test runner).** With `HARNESS_SANDBOX=docker`, the
+   verifier runs `pytest`/`ruff` inside an ephemeral container:
+   `--network none --user 1000:1000 --read-only --tmpfs /tmp`, only the run's
+   workdir mounted at `/work`. Build the image once:
+
+   ```bash
+   docker build -f infra/Dockerfile.runner -t harness-runner:latest .
+   ```
+
+   The default `HARNESS_SANDBOX=local` runs the command in-process (fast,
+   dependency-free) for the deterministic demo.
+
+**Per-run isolation** = a fresh clone in a unique dir per `run_id`, one container
+per run, nothing shared. That same scoping is the production tenant-isolation
+answer: Agent A cannot reach Agent B's filesystem or the network.
+
+**Rollback on abort.** Each workdir is a git repo with a clean baseline commit, so
+after the 3-iteration cap trips, the abort node does `git reset --hard` +
+`git clean -fd` — every edit (including new files) is discarded, leaving no
+partial state. Drive it with the cap-trip switch:
+
+```bash
+HARNESS_FORCE_FAIL=1 python -m src.cli run "file://$PWD/test-repo" --run-id demo
+# -> 3x fail -> status=aborted -> workdir restored to baseline
+```
+
 ## Quick start
 
 ```bash

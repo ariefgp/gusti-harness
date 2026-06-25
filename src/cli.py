@@ -15,6 +15,11 @@ from src.harness.workspace import prepare_workdir
 app = typer.Typer(add_completion=False, help="gusti-harness — multi-file refactor agent")
 
 
+@app.callback()
+def _main():
+    """Keep `run` as an explicit subcommand even though it's the only one."""
+
+
 def _initial_state(repo_url: str, workdir: str) -> dict:
     return {
         "repo_url": repo_url,

@@ -28,11 +28,13 @@ def verify_node(state: RunState) -> dict:
         "stderr": result.err,
     }
     if result.ok:
+        next_index = state["current_task_index"] + 1
+        all_done = next_index >= len(state["plan"]["tasks"])
         return {
             "feedback": state["feedback"] + [fb],
-            "current_task_index": state["current_task_index"] + 1,
+            "current_task_index": next_index,
             "iteration": 0,
-            "status": "executing",
+            "status": "done" if all_done else "executing",
         }
     return {
         "feedback": state["feedback"] + [fb],

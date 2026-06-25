@@ -9,8 +9,9 @@ change in an isolated sandbox, and self-correct on failure.
 schema). Naturally multi-file, trivially testable (bad payload → expect `422`),
 and the failure path self-corrects in a way that exercises the verifier loop.
 
-> Status: scaffolding in place (Phase 0–1). Build order tracked in the internal
-> guide; see `git log` for progress.
+**Stack:** LangGraph + Python, calling the Anthropic SDK directly inside graph
+nodes. LangGraph's checkpointer gives resume-from-crash almost for free, and its
+graph *is* the state machine.
 
 ## Architecture
 
@@ -117,13 +118,33 @@ LLM spans with token usage nested underneath. Query them programmatically with
 
 ## Quick start
 
+**Prerequisites:** Python 3.11+, Git. Docker only if you want the containerized
+sandbox (`HARNESS_SANDBOX=docker`) or the `docker compose` boot. You need exactly
+**one secret**: `ANTHROPIC_API_KEY`.
+
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -e .
-cp .env.example .env   # add ANTHROPIC_API_KEY
+make install                       # venv + editable install + demo deps
+# put ANTHROPIC_API_KEY in .env
+make run                           # run the harness against test-repo
+make test                          # hermetic unit suite (no key/Docker needed)
 ```
 
-You need exactly one secret: `ANTHROPIC_API_KEY`.
+`make help` lists every target. The graded demos map to targets:
+
+| Target | Shows |
+|---|---|
+| `make demo-run` | clean green run (planner → execute → verify) |
+| `make demo-abort` | forced 3-iteration abort + git rollback |
+| `make demo-crash` then `make demo-resume` | kill -9 mid-run, then resume (no re-plan, completed file skipped) |
+| `make show-checkpoint RUN=demo3` | the persisted checkpoint between crash and resume |
+
+Or run directly:
+
+```bash
+uv venv && source .venv/bin/activate && uv pip install -e .
+cp .env.example .env               # add ANTHROPIC_API_KEY
+python -m src.cli run "file://$PWD/test-repo" --telemetry
+```
 
 ## Scale path
 
@@ -147,3 +168,29 @@ src/cli.py        # python -m src.cli run <repo_url>  |  enqueue <repo_url>
 infra/            # Dockerfile, docker-compose, k8s/KEDA sketch, architecture brief
 test-repo/        # planted-debt dummy repo for the deterministic demo
 ```
+
+## Design decisions
+
+- **State recovery:** the run is a typed `RunState` checkpointed by LangGraph after
+  each committed super-step, keyed by `thread_id == run_id`. Plan persisted once
+  (no re-plan); `current_task_index` advances only on a verified file (completed
+  files skipped). SQLite locally, Postgres in prod — same interface.
+- **Cost control:** prompt generated once, idempotent per-file advance, and a
+  3-iteration hard cap per file that also bounds worst-case token spend.
+- **Isolation:** per-run clone in a unique dir + per-run non-root, no-network,
+  read-only container; path-guarded FS tools as the always-on first layer.
+- **No over-engineering:** one linear graph with a single verifier loop (no
+  multi-agent debate); the thousand-run story is shipped as architecture
+  (`infra/`), not a running cluster.
+
+## Verified vs. needs-a-box
+
+| Check | Status |
+|---|---|
+| Vertical slice green, plan→edit→verify | ✅ live |
+| Crash + resume (no re-plan, file skipped) | ✅ live |
+| Forced 3-iteration abort + git rollback | ✅ live |
+| Telemetry spans in Phoenix (per-node + per-iteration) | ✅ live |
+| Hermetic unit suite (routing, path-guard, rollback, isolation) | ✅ 11 passing |
+| Containerized sandbox (`HARNESS_SANDBOX=docker`) | ⚙️ wired + command validated; needs Docker daemon |
+| `docker compose up` cold-start timing | ⚙️ needs a clean box to time the <15-min claim |

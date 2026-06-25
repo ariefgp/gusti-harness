@@ -1,5 +1,6 @@
-# Internal build plan — not for the graded submission
+# Internal build plan + demo/video script — not for the graded submission
 BUILD_GUIDE.md
+DEMO_SCRIPT.md
 
 # Secrets
 .env

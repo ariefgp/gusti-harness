@@ -15,6 +15,7 @@ import typer
 
 from src.harness.checkpoint import make_checkpointer
 from src.harness.graph import compile_app
+from src.harness.telemetry import setup_telemetry
 from src.harness.workspace import prepare_workdir
 
 app = typer.Typer(add_completion=False, help="gusti-harness — multi-file refactor agent")
@@ -53,8 +54,13 @@ def run(
     repo_url: str = typer.Argument(..., help="file:// path, local path, or git URL"),
     run_id: str = typer.Option(None, help="Stable id (resume key). Random if omitted."),
     no_checkpoint: bool = typer.Option(False, help="Run unpersisted (no resume)."),
+    telemetry: bool = typer.Option(False, help="Emit OTel spans to Phoenix."),
 ):
     """Run the Planner -> Executor -> Verifier graph against a repo (resumable)."""
+    if telemetry:
+        setup_telemetry(force=True)
+    else:
+        setup_telemetry()  # honors HARNESS_TELEMETRY env if set
     run_id = run_id or uuid.uuid4().hex[:12]
     workdir = prepare_workdir(repo_url, run_id)
     typer.echo(f"run_id={run_id}")

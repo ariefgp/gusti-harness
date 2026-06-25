@@ -10,6 +10,7 @@ import pathlib
 
 from ..config import MODEL_PLANNER, get_client, load_prompt
 from ..state import Plan, RunState
+from ..telemetry import record_tokens, set_attr, span
 
 _IGNORE_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache"}
 
@@ -39,18 +40,21 @@ def _strip_fences(raw: str) -> str:
 
 
 def plan_node(state: RunState) -> dict:
-    tree = read_repo_tree(state["workdir"])
-    msg = get_client().messages.create(
-        model=MODEL_PLANNER,
-        max_tokens=2000,
-        system=load_prompt("planner"),
-        messages=[{"role": "user", "content": f"Repository tree:\n{tree}"}],
-    )
-    raw = msg.content[0].text
-    plan = Plan.model_validate_json(_strip_fences(raw))  # hard-validate the JSON
-    return {
-        "plan": plan.model_dump(),
-        "status": "executing",
-        "current_task_index": 0,
-        "iteration": 0,
-    }
+    with span("planner"):
+        tree = read_repo_tree(state["workdir"])
+        msg = get_client().messages.create(
+            model=MODEL_PLANNER,
+            max_tokens=2000,
+            system=load_prompt("planner"),
+            messages=[{"role": "user", "content": f"Repository tree:\n{tree}"}],
+        )
+        record_tokens(msg.usage)
+        raw = msg.content[0].text
+        plan = Plan.model_validate_json(_strip_fences(raw))  # hard-validate JSON
+        set_attr("plan.n_tasks", len(plan.tasks))
+        return {
+            "plan": plan.model_dump(),
+            "status": "executing",
+            "current_task_index": 0,
+            "iteration": 0,
+        }

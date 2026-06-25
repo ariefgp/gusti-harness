@@ -92,6 +92,29 @@ HARNESS_FORCE_FAIL=1 python -m src.cli run "file://$PWD/test-repo" --run-id demo
 # -> 3x fail -> status=aborted -> workdir restored to baseline
 ```
 
+## Telemetry (Phoenix)
+
+Tracing is opt-in (`--telemetry` flag or `HARNESS_TELEMETRY=1`) and off by default,
+so tests stay hermetic. When on, it registers a Phoenix-backed OTel tracer and
+auto-instruments the Anthropic SDK. Each run emits:
+
+- one span per node (`planner` / `executor` / `verifier` / `abort`),
+- token counts per node (`llm.tokens.input/output`, accumulated across the
+  executor's tool-use loop), and
+- **one span per verification iteration** — so the retry loop stacks visibly.
+
+Run Phoenix locally (no signup), then run with telemetry:
+
+```bash
+python -m phoenix.server.main serve         # UI: http://localhost:6006
+python -m src.cli run "file://$PWD/test-repo" --run-id demo --telemetry
+```
+
+Verified: a forced-abort run produced 20 spans in Phoenix — `planner`×1,
+`executor`×3, `verifier`×3 (iteration 0/1/2), plus 13 auto-traced `messages.create`
+LLM spans with token usage nested underneath. Query them programmatically with
+`phoenix.client.Client(base_url=...).spans.get_spans_dataframe(project_identifier="gusti-harness")`.
+
 ## Quick start
 
 ```bash

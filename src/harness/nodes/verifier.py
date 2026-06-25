@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 from ..state import RunState
+from ..telemetry import set_attr, span
 from ..tools.sandbox import run_in_sandbox
 
 # Deterministic slice defaults to pytest-only; set VERIFY_CMD to add `&& ruff check .`
@@ -18,6 +19,13 @@ DEFAULT_VERIFY_CMD = "python -m pytest -q"
 
 
 def verify_node(state: RunState) -> dict:
+    # One span per call == one span per verification iteration -> the loop stacks
+    # visibly in Phoenix (the back-pressure visual).
+    with span("verifier"):
+        return _verify(state)
+
+
+def _verify(state: RunState) -> dict:
     cmd = os.getenv("VERIFY_CMD", DEFAULT_VERIFY_CMD)
     result = run_in_sandbox(state["workdir"], cmd=cmd)
     if os.getenv("HARNESS_FORCE_FAIL"):
@@ -25,6 +33,8 @@ def verify_node(state: RunState) -> dict:
         # abort + rollback path (for the forced-failure demo).
         result = result.__class__(ok=False, out=result.out, err="forced failure (HARNESS_FORCE_FAIL)")
     it = state["iteration"]
+    set_attr("iteration", it)
+    set_attr("passed", result.ok)
     fb = {
         "iteration": it,
         "passed": result.ok,

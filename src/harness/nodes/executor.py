@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from ..config import MODEL_EXECUTOR, get_client, load_prompt
 from ..state import RunState
+from ..telemetry import record_tokens, set_attr, span
 from ..tools.fs_tools import EXECUTOR_TOOLS, dispatch_tool
 
 _MAX_TOOL_TURNS = 8
@@ -34,44 +35,49 @@ def _build_initial_message(task: dict, feedback: list[dict]) -> str:
 
 
 def execute_node(state: RunState) -> dict:
-    task = state["plan"]["tasks"][state["current_task_index"]]
-    feedback = state["feedback"][-3:]
-    workdir = state["workdir"]
+    with span("executor"):
+        task = state["plan"]["tasks"][state["current_task_index"]]
+        feedback = state["feedback"][-3:]
+        workdir = state["workdir"]
+        set_attr("task.index", state["current_task_index"])
+        set_attr("task.path", task["path"])
+        set_attr("retry", bool(feedback))
 
-    messages = [
-        {"role": "user", "content": _build_initial_message(task, feedback)}
-    ]
+        messages = [
+            {"role": "user", "content": _build_initial_message(task, feedback)}
+        ]
 
-    for _ in range(_MAX_TOOL_TURNS):
-        msg = get_client().messages.create(
-            model=MODEL_EXECUTOR,
-            max_tokens=4000,
-            system=load_prompt("executor"),
-            tools=EXECUTOR_TOOLS,
-            messages=messages,
-        )
-        messages.append({"role": "assistant", "content": msg.content})
+        for _ in range(_MAX_TOOL_TURNS):
+            msg = get_client().messages.create(
+                model=MODEL_EXECUTOR,
+                max_tokens=4000,
+                system=load_prompt("executor"),
+                tools=EXECUTOR_TOOLS,
+                messages=messages,
+            )
+            record_tokens(msg.usage)  # accumulates across the tool-use loop
+            messages.append({"role": "assistant", "content": msg.content})
 
-        tool_uses = [b for b in msg.content if b.type == "tool_use"]
-        if not tool_uses:
-            break
+            tool_uses = [b for b in msg.content if b.type == "tool_use"]
+            if not tool_uses:
+                break
 
-        results = []
-        for tu in tool_uses:
-            try:
-                out = dispatch_tool(tu.name, workdir, tu.input)
-                results.append(
-                    {"type": "tool_result", "tool_use_id": tu.id, "content": out}
-                )
-            except Exception as e:  # surface guard/IO errors back to the model
-                results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tu.id,
-                        "content": f"ERROR: {e}",
-                        "is_error": True,
-                    }
-                )
-        messages.append({"role": "user", "content": results})
+            results = []
+            for tu in tool_uses:
+                try:
+                    out = dispatch_tool(tu.name, workdir, tu.input)
+                    results.append(
+                        {"type": "tool_result", "tool_use_id": tu.id, "content": out}
+                    )
+                except Exception as e:  # surface guard/IO errors back to the model
+                    results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tu.id,
+                            "content": f"ERROR: {e}",
+                            "is_error": True,
+                        }
+                    )
+            messages.append({"role": "user", "content": results})
 
-    return {"status": "verifying"}
+        return {"status": "verifying"}

@@ -125,12 +125,25 @@ cp .env.example .env   # add ANTHROPIC_API_KEY
 
 You need exactly one secret: `ANTHROPIC_API_KEY`.
 
+## Scale path
+
+The *same* harness code runs behind a queue — only the entrypoint changes
+(`src/cli.py` → `src/worker.py`). One run = one Redis message = one `thread_id`;
+stateless workers pull and execute, and KEDA scales them on queue depth. See
+[`infra/architecture.md`](infra/architecture.md) for the diagram and the three
+production answers (state/resilience, telemetry, scaling/tenant-isolation).
+
+```bash
+docker compose -f infra/docker-compose.yml up          # postgres + redis + phoenix + worker
+python -m src.cli enqueue "https://github.com/org/repo" # push a run; a worker drains it
+```
+
 ## Layout
 
 ```
 src/harness/      # graph, state, nodes, tools, prompts, telemetry, config
 src/worker.py     # queue consumer (horizontal-scale entrypoint)
-src/cli.py        # python -m src.cli run <repo_url>
+src/cli.py        # python -m src.cli run <repo_url>  |  enqueue <repo_url>
 infra/            # Dockerfile, docker-compose, k8s/KEDA sketch, architecture brief
 test-repo/        # planted-debt dummy repo for the deterministic demo
 ```

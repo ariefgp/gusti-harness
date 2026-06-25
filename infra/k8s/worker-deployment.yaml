@@ -1,0 +1,32 @@
+# Stateless worker Deployment. Replicas are driven by KEDA (see scaledobject.yaml),
+# NOT set by hand — this is just the pod template KEDA scales from 0..N.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness-worker
+spec:
+  replicas: 0            # KEDA owns this; start at zero, scale on queue depth
+  selector:
+    matchLabels: { app: harness-worker }
+  template:
+    metadata:
+      labels: { app: harness-worker }
+    spec:
+      containers:
+        - name: worker
+          image: harness:latest        # built from infra/Dockerfile
+          command: ["python", "-m", "src.worker"]
+          env:
+            - name: REDIS_URL
+              value: redis://redis:6379
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: harness-secrets, key: database-url } }
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: harness-secrets, key: anthropic-api-key } }
+            - name: PHOENIX_ENDPOINT
+              value: http://phoenix:4317
+            - name: HARNESS_TELEMETRY
+              value: "1"
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "2Gi" }

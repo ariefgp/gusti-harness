@@ -1,0 +1,46 @@
+# One-command local boot of the full harness: durable state (postgres), the run
+# queue (redis), the telemetry UI (phoenix), and a worker that pulls and executes.
+#   docker compose -f infra/docker-compose.yml up
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: dev
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports: ["6006:6006", "4317:4317"]   # UI + OTLP collector
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    env_file: ../.env
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/postgres
+      PHOENIX_ENDPOINT: http://phoenix:4317
+      HARNESS_TELEMETRY: "1"
+      HARNESS_SANDBOX: docker
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      phoenix: { condition: service_started }
+    # Mount the Docker socket so the worker can launch per-run runner containers.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

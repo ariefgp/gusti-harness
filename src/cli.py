@@ -107,5 +107,23 @@ def run(
     _report(final)
 
 
+@app.command()
+def enqueue(
+    repo_url: str = typer.Argument(..., help="file:// path, local path, or git URL"),
+    run_id: str = typer.Option(None, help="Stable id (resume key). Random if omitted."),
+    queue: str = typer.Option("runs", help="Redis list name."),
+):
+    """Push a run onto the Redis queue for a worker to pick up."""
+    import json
+    import os
+
+    import redis
+
+    run_id = run_id or uuid.uuid4().hex[:12]
+    r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
+    r.rpush(queue, json.dumps({"run_id": run_id, "repo_url": repo_url}))
+    typer.echo(f"enqueued run_id={run_id} -> {queue}")
+
+
 if __name__ == "__main__":
     app()

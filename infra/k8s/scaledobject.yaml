@@ -1,0 +1,19 @@
+# KEDA scales the worker Deployment on Redis queue depth: 0 workers when the queue
+# is empty, up to maxReplicaCount when it backs up. One worker drains ~one run at a
+# time, so "thousands of concurrent runs" == enough replicas to hold the queue flat.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: harness-worker-scaler
+spec:
+  scaleTargetRef:
+    name: harness-worker
+  minReplicaCount: 0
+  maxReplicaCount: 200
+  cooldownPeriod: 120
+  triggers:
+    - type: redis
+      metadata:
+        address: redis:6379
+        listName: runs
+        listLength: "5"        # target ~5 queued runs per worker; scale up past that

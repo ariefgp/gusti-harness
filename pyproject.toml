@@ -30,6 +30,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.pytest.ini_options]
+# Scope default collection to the harness suite. Without this, a bare `pytest`
+# at the repo root also tries to collect ./test-repo/tests, which is *also* a
+# package named `tests` — the import-mode name collision breaks collection.
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

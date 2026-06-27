@@ -15,11 +15,15 @@ What gets traced (the visual proof):
 
 from __future__ import annotations
 
+import logging
 import os
+import socket
+from urllib.parse import urlparse
 
 from opentelemetry import trace
 
 _PROJECT = "gusti-harness"
+_DEFAULT_OTLP = "localhost:4317"  # phoenix.otel.register's default gRPC collector
 _tracer = trace.get_tracer("harness")  # no-op proxy until a provider is registered
 _enabled = False
 
@@ -28,10 +32,31 @@ def _is_truthy(v: str | None) -> bool:
     return (v or "").lower() in ("1", "true", "on", "yes")
 
 
+def _collector_host_port(endpoint: str | None) -> tuple[str, int]:
+    """Resolve the OTLP collector host/port we'll try to reach."""
+    target = endpoint or _DEFAULT_OTLP
+    if "://" in target:
+        parsed = urlparse(target)
+        return parsed.hostname or "localhost", parsed.port or 4317
+    host, _, port = target.partition(":")
+    return host or "localhost", int(port or 4317)
+
+
+def _collector_reachable(endpoint: str | None, timeout: float = 0.5) -> bool:
+    """Quick TCP probe so we fail once, loudly, instead of retrying forever."""
+    host, port = _collector_host_port(endpoint)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def setup_telemetry(force: bool = False):
     """Register a Phoenix-backed tracer provider and auto-instrument Anthropic.
 
-    Returns the provider (or None if telemetry is disabled). Safe to call once.
+    Returns the provider (or None if telemetry is disabled or Phoenix is
+    unreachable). Safe to call once.
     """
     global _tracer, _enabled
     if not (force or _is_truthy(os.getenv("HARNESS_TELEMETRY"))):
@@ -39,10 +64,24 @@ def setup_telemetry(force: bool = False):
     if _enabled:
         return None
 
+    endpoint = os.getenv("PHOENIX_ENDPOINT")  # default: local Phoenix collector
+    if not _collector_reachable(endpoint):
+        host, port = _collector_host_port(endpoint)
+        print(
+            f"[telemetry] Phoenix collector not reachable at {host}:{port}; running "
+            "without tracing. Start it with `make phoenix` (or `docker compose up`), "
+            "then re-run.",
+            flush=True,
+        )
+        return None
+
+    # Belt-and-suspenders: if the collector drops mid-run, keep the failure to a
+    # single quiet log line instead of a flood of retry warnings on stderr.
+    logging.getLogger("opentelemetry.exporter.otlp").setLevel(logging.CRITICAL)
+
     from openinference.instrumentation.anthropic import AnthropicInstrumentor
     from phoenix.otel import register
 
-    endpoint = os.getenv("PHOENIX_ENDPOINT")  # default: local Phoenix collector
     provider = register(
         project_name=_PROJECT,
         endpoint=endpoint,

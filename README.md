@@ -49,11 +49,25 @@ python -m src.cli run "file://$PWD/test-repo" --run-id demo
 # -> "resuming from last checkpoint (planner skipped)" -> status=done
 ```
 
-**Cost-on-resume controls:**
+**Cost controls:**
 - The **plan is generated once** and persisted, so the Planner never re-runs.
 - `current_task_index` advances only after a file passes verification, so resume
   **skips completed files** — no duplicate edits, no duplicate tokens.
-- The **3-iteration hard cap** per file bounds worst-case token spend (→ abort).
+- A **cumulative token ceiling** (`RUN_TOKEN_CEILING`) is tracked in `RunState` and
+  trips an abort at the next boundary; the **3-iteration hard cap** per file bounds
+  worst-case spend independently.
+- **Prompt caching** is wired (`cache_control` on the executor's static prefix) and
+  cache tokens are recorded per node in Phoenix. Note: it only engages once the
+  cached prefix crosses the model's ~1024-token minimum, so it's a no-op on the
+  tiny demo repo and active on real targets — not claimed as a demo headline.
+
+**Filesystem ↔ checkpoint consistency.** Only `RunState` is checkpointed, not the
+workdir. To keep them aligned, state progress is mirrored into git: the verifier
+**commits** the working tree after each passed task, and the executor **resets to
+that last commit on entry**. So a crash *mid-executor* (after a partial
+`write_file`/`search_replace`) leaves no dirty edits to corrupt the retry — resume
+discards the partial attempt and keeps completed-task files intact. See
+`src/harness/gitutil.py`.
 
 > Note (LangGraph 1.x): `stream()` yields a step's update *before* its checkpoint
 > commits, so the durable checkpoint lags one super-step. The crash demo arms on
@@ -76,8 +90,15 @@ Two layers of containment:
    docker build -f infra/Dockerfile.runner -t harness-runner:latest .
    ```
 
-   The default `HARNESS_SANDBOX=local` runs the command in-process (fast,
-   dependency-free) for the deterministic demo.
+**Backend selection & security posture.** If `HARNESS_SANDBOX` is unset, the
+harness **auto-selects `docker` when the daemon is reachable and the runner image
+is built**, else falls back to `local` with a loud warning. Set it explicitly to
+force a backend.
+
+| Backend | Test process isolation | When |
+|---|---|---|
+| `docker` | network-off, non-root, read-only rootfs, only workdir mounted | default when available; required for the real security story |
+| `local` | **none** — runs on the host; only the FS *tools* are path-guarded, not the test process | fast, dependency-free fallback for the deterministic demo |
 
 **Per-run isolation** = a fresh clone in a unique dir per `run_id`, one container
 per run, nothing shared. That same scoping is the production tenant-isolation
@@ -99,9 +120,11 @@ Tracing is opt-in (`--telemetry` flag or `HARNESS_TELEMETRY=1`) and off by defau
 so tests stay hermetic. When on, it registers a Phoenix-backed OTel tracer and
 auto-instruments the Anthropic SDK. Each run emits:
 
-- one span per node (`planner` / `executor` / `verifier` / `abort`),
-- token counts per node (`llm.tokens.input/output`, accumulated across the
-  executor's tool-use loop), and
+- one span per node (`planner` / `executor` / `verifier` / `abort` — the abort
+  rollback path is now traced too),
+- token counts per node (`llm.tokens.input/output` + `cache_read`/`cache_write`,
+  accumulated across the executor's tool-use loop), plus the chosen `model` and the
+  verifier's one-line `diagnosis` as span attributes, and
 - **one span per verification iteration** — so the retry loop stacks visibly.
 
 Run Phoenix locally (no signup), then run with telemetry:
@@ -188,9 +211,12 @@ test-repo/        # planted-debt dummy repo for the deterministic demo
 | Check | Status |
 |---|---|
 | Vertical slice green, plan→edit→verify | ✅ live |
-| Crash + resume (no re-plan, file skipped) | ✅ live |
-| Forced 3-iteration abort + git rollback | ✅ live |
-| Telemetry spans in Phoenix (per-node + per-iteration) | ✅ live |
-| Hermetic unit suite (routing, path-guard, rollback, isolation) | ✅ 11 passing |
-| Containerized sandbox (`HARNESS_SANDBOX=docker`) | ⚙️ wired + command validated; needs Docker daemon |
+| Crash + resume (no re-plan, file skipped, workdir re-baselined) | ✅ live |
+| Forced 3-iteration abort + git rollback to baseline | ✅ live |
+| Per-task git commits + Opus escalation on final retry | ✅ live |
+| Verifier Haiku diagnosis feeding retries | ✅ live |
+| Telemetry in Phoenix (per-node, per-iteration, tokens, model, cache attrs) | ✅ live |
+| Token-ceiling guardrail (`RUN_TOKEN_CEILING` → abort) | ✅ unit-tested |
+| Hermetic unit suite (routing, path-guard, rollback, isolation, gitutil) | ✅ 13 passing |
+| Containerized sandbox (`HARNESS_SANDBOX=docker`, auto-selected) | ⚙️ wired + command validated; needs Docker daemon |
 | `docker compose up` cold-start timing | ⚙️ needs a clean box to time the <15-min claim |

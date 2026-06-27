@@ -34,6 +34,7 @@ def _initial_state(repo_url: str, workdir: str) -> dict:
         "current_task_index": 0,
         "iteration": 0,
         "feedback": [],
+        "tokens_spent": 0,
         "status": "planning",
     }
 

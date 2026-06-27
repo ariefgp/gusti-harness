@@ -52,9 +52,11 @@ def plan_node(state: RunState) -> dict:
         raw = msg.content[0].text
         plan = Plan.model_validate_json(_strip_fences(raw))  # hard-validate JSON
         set_attr("plan.n_tasks", len(plan.tasks))
+        spent = (msg.usage.input_tokens or 0) + (msg.usage.output_tokens or 0)
         return {
             "plan": plan.model_dump(),
             "status": "executing",
             "current_task_index": 0,
             "iteration": 0,
+            "tokens_spent": state.get("tokens_spent", 0) + spent,
         }

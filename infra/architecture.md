@@ -18,9 +18,11 @@ A nearly-linear state machine with a single self-loop on the Verifier. The graph
 
 - **Planner** (Sonnet, read-only): repo tree → dependency-ordered JSON plan,
   hard-validated, persisted once.
-- **Executor** (Sonnet): edits one file via path-guarded tool-use.
-- **Verifier** (sandbox): `pytest`(+`ruff`) in an isolated container; loops back to
-  the Executor with feedback, max 3 iterations, then aborts.
+- **Executor** (Sonnet; escalates to Opus on the final retry): edits one file via
+  path-guarded tool-use; resets the workdir to the last passed-task commit on entry.
+- **Verifier** (sandbox): `pytest`(+`ruff`) in an isolated container; on failure a
+  cheap Haiku call distills the output into a one-line diagnosis the Executor acts
+  on; loops back with feedback, max 3 iterations, then aborts.
 
 ## Production topology (the scale path)
 
@@ -62,7 +64,8 @@ on queue depth (0 → maxReplicas).
 - A re-delivered queue message (worker died, pod evicted) calls `invoke(None, config)`
   and **resumes from the last checkpoint**. Locally this is SQLite; in prod it's the
   Postgres checkpointer — same interface, swap the saver.
-- Worst-case cost is bounded by the 3-iteration hard cap per file (→ abort).
+- Worst-case cost is bounded by the 3-iteration hard cap per file *and* a
+  cumulative `RUN_TOKEN_CEILING` tracked in `RunState` that trips an abort.
 
 ### 2. Telemetry (what happened, what did it cost)
 

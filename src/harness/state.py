@@ -14,8 +14,7 @@ from pydantic import BaseModel
 class FileTask(BaseModel):
     path: str
     action: str  # e.g. "add_pydantic_validation"
-    depends_on: list[str] = []
-    status: Literal["pending", "done", "failed"] = "pending"
+    depends_on: list[str] = []  # ordering hint shown to the executor
 
 
 class Plan(BaseModel):
@@ -36,4 +35,5 @@ class RunState(TypedDict):
     current_task_index: int
     iteration: int  # verifier retries for current file (0..3)
     feedback: list[dict]  # VerifierFeedback history
+    tokens_spent: int  # cumulative LLM tokens (ceiling guardrail)
     status: Literal["planning", "executing", "verifying", "done", "aborted"]

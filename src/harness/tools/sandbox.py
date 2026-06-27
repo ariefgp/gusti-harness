@@ -62,8 +62,51 @@ def _run_docker(workdir: str, cmd: str) -> Result:
     return Result(ok=p.returncode == 0, out=p.stdout, err=p.stderr)
 
 
+_docker_ready: bool | None = None
+_warned_local = False
+
+
+def _docker_ready_for_runs() -> bool:
+    """True only if the daemon is reachable AND the runner image is present —
+    otherwise auto-selecting docker would fail every verify."""
+    global _docker_ready
+    if _docker_ready is None:
+        try:
+            info = subprocess.run(
+                ["docker", "info"], capture_output=True, text=True, timeout=10
+            )
+            img = subprocess.run(
+                ["docker", "image", "inspect", RUNNER_IMAGE],
+                capture_output=True, text=True, timeout=10,
+            )
+            _docker_ready = info.returncode == 0 and img.returncode == 0
+        except Exception:
+            _docker_ready = False
+    return _docker_ready
+
+
+def _select_backend() -> str:
+    """Honor an explicit HARNESS_SANDBOX; otherwise prefer the secure docker
+    backend when it's usable, falling back to local with a loud warning."""
+    explicit = os.getenv("HARNESS_SANDBOX")
+    if explicit:
+        return explicit.lower()
+    if _docker_ready_for_runs():
+        return "docker"
+    global _warned_local
+    if not _warned_local:
+        _warned_local = True
+        print(
+            f"[sandbox] docker backend unavailable (daemon down or '{RUNNER_IMAGE}' not "
+            "built — run `make docker-runner`); falling back to NON-ISOLATED local "
+            "backend (host subprocess, FS path-guarded only). Set HARNESS_SANDBOX=docker "
+            "to require isolation.",
+            flush=True,
+        )
+    return "local"
+
+
 def run_in_sandbox(workdir: str, cmd: str) -> Result:
-    backend = os.getenv("HARNESS_SANDBOX", "local").lower()
-    if backend == "docker":
+    if _select_backend() == "docker":
         return _run_docker(workdir, cmd)
     return _run_local(workdir, cmd)

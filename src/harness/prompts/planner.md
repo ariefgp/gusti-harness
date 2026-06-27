@@ -13,8 +13,7 @@ Rules:
     {
       "path": "<repo-relative file path>",
       "action": "<short verb phrase, e.g. add_pydantic_schemas>",
-      "depends_on": ["<paths this task depends on>"],
-      "status": "pending"
+      "depends_on": ["<paths this task depends on>"]
     }
   ]
 }

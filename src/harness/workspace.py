@@ -14,6 +14,8 @@ import subprocess
 import tempfile
 from urllib.parse import urlparse
 
+from . import gitutil
+
 
 def _local_path(repo_url: str) -> str | None:
     if repo_url.startswith("file://"):
@@ -44,7 +46,6 @@ def prepare_workdir(repo_url: str, run_id: str) -> str:
         shutil.copytree(
             src, workdir, ignore=shutil.ignore_patterns(".venv", "__pycache__", ".git")
         )
-        _git_baseline(str(workdir))  # so abort can roll back a non-git source
     else:
         # Remote URL — clone over the network.
         subprocess.run(
@@ -53,20 +54,7 @@ def prepare_workdir(repo_url: str, run_id: str) -> str:
             capture_output=True,
             text=True,
         )
+    # Tag the pristine repo so abort can roll all the way back, and so the
+    # per-task progress commits have a baseline to sit on (clone or copy alike).
+    gitutil.init_baseline(str(workdir))
     return str(workdir)
-
-
-def _git(workdir: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", workdir, *args], check=True, capture_output=True, text=True
-    )
-
-
-def _git_baseline(workdir: str) -> None:
-    """Init a git repo with one clean commit, so the agent's edits are a working
-    tree we can `git reset --hard` back to on abort (the rollback guarantee)."""
-    _git(workdir, "init", "--quiet")
-    _git(workdir, "-c", "user.email=harness@local", "-c", "user.name=harness",
-         "add", "-A")
-    _git(workdir, "-c", "user.email=harness@local", "-c", "user.name=harness",
-         "commit", "--quiet", "-m", "baseline")

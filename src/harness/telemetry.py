@@ -78,6 +78,11 @@ def record_tokens(usage, prefix: str = "llm.tokens") -> None:
     out = getattr(usage, "output_tokens", 0) or 0
     _add(sp, f"{prefix}.input", inp)
     _add(sp, f"{prefix}.output", out)
+    # Prompt-cache visibility: makes cache hits/writes show up per node in Phoenix.
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    _add(sp, f"{prefix}.cache_write", cache_write)
+    _add(sp, f"{prefix}.cache_read", cache_read)
 
 
 def _add(sp, key: str, delta: int) -> None:

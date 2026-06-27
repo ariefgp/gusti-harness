@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .config import MAX_VERIFIER_ITERATIONS
+from .config import MAX_VERIFIER_ITERATIONS, RUN_TOKEN_CEILING
 from .nodes.abort import abort_node
 from .nodes.executor import execute_node
 from .nodes.planner import plan_node
@@ -20,6 +20,9 @@ from .state import RunState
 
 
 def route_after_verify(state: RunState) -> str:
+    # Hard token guardrail: abort at the next boundary if the run overspends.
+    if state.get("tokens_spent", 0) >= RUN_TOKEN_CEILING:
+        return "abort"
     tasks = state["plan"]["tasks"]
     if state["iteration"] == 0:
         # current file passed and advanced; done if no more tasks

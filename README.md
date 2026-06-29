@@ -189,10 +189,25 @@ A tiny HTTP trigger (`src/server.py`) lets a grader run the harness from a brows
 a companion Phoenix service shows the traces. Deploy steps in
 [`infra/railway.md`](infra/railway.md).
 
+**Live environment**
+
+| | URL |
+|---|---|
+| App (HTTP trigger) | https://gusti-harness-production.up.railway.app |
+| Phoenix (trace UI) | https://phoenix-production-432a.up.railway.app |
+
+The `DEMO_TOKEN` for `POST /run` is provided **separately in the submission** (not
+committed here, so the public URL can't drain the API key).
+
 ```bash
+URL=https://gusti-harness-production.up.railway.app
+curl "$URL/healthz"                                       # {"ok":true}
 curl -X POST "$URL/run?token=$DEMO_TOKEN"                 # clean run  -> status: done
 curl -X POST "$URL/run?token=$DEMO_TOKEN&force_fail=true" # abort demo -> status: aborted
 ```
+
+After a run, open the Phoenix UI → the **`gusti-harness`** project → click a trace to
+see the planner/executor/verifier spans and the stacked verifier loop.
 
 > Hosted runs use the `local` sandbox (no Docker-in-Docker on Railway); the
 > container-isolated path stays available for local / `docker compose`.
@@ -214,8 +229,9 @@ test-repo/        # planted-debt dummy repo for the deterministic demo
   each committed super-step, keyed by `thread_id == run_id`. Plan persisted once
   (no re-plan); `current_task_index` advances only on a verified file (completed
   files skipped). SQLite locally, Postgres in prod — same interface.
-- **Cost control:** prompt generated once, idempotent per-file advance, and a
-  3-iteration hard cap per file that also bounds worst-case token spend.
+- **Cost control:** plan generated once, idempotent per-file advance, a 3-iteration
+  hard cap per file, and a cumulative `RUN_TOKEN_CEILING` that trips an abort;
+  prompt caching wired on the executor's static prefix.
 - **Isolation:** per-run clone in a unique dir + per-run non-root, no-network,
   read-only container; path-guarded FS tools as the always-on first layer.
 - **No over-engineering:** one linear graph with a single verifier loop (no
@@ -234,5 +250,6 @@ test-repo/        # planted-debt dummy repo for the deterministic demo
 | Telemetry in Phoenix (per-node, per-iteration, tokens, model, cache attrs) | ✅ live |
 | Token-ceiling guardrail (`RUN_TOKEN_CEILING` → abort) | ✅ unit-tested |
 | Hermetic unit suite (routing, path-guard, rollback, isolation, gitutil) | ✅ 13 passing |
+| Hosted demo on Railway (HTTP trigger + Phoenix traces) | ✅ live |
 | Containerized sandbox (`HARNESS_SANDBOX=docker`, auto-selected) | ⚙️ wired + command validated; needs Docker daemon |
 | `docker compose up` cold-start timing | ⚙️ needs a clean box to time the <15-min claim |

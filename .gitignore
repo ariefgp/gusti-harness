@@ -21,8 +21,11 @@ dist/
 
 # LangGraph / local state
 checkpoints.db
+checkpoints.db-*
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # OS / editor
 .DS_Store

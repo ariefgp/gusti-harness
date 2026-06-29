@@ -182,13 +182,29 @@ docker compose -f infra/docker-compose.yml up          # postgres + redis + phoe
 python -m src.cli enqueue "https://github.com/org/repo" # push a run; a worker drains it
 ```
 
+## Hosted demo (Railway)
+
+A tiny HTTP trigger (`src/server.py`) lets a grader run the harness from a browser:
+`POST /run` (token-gated) refactors the bundled `test-repo` live and returns JSON;
+a companion Phoenix service shows the traces. Deploy steps in
+[`infra/railway.md`](infra/railway.md).
+
+```bash
+curl -X POST "$URL/run?token=$DEMO_TOKEN"                 # clean run  -> status: done
+curl -X POST "$URL/run?token=$DEMO_TOKEN&force_fail=true" # abort demo -> status: aborted
+```
+
+> Hosted runs use the `local` sandbox (no Docker-in-Docker on Railway); the
+> container-isolated path stays available for local / `docker compose`.
+
 ## Layout
 
 ```
 src/harness/      # graph, state, nodes, tools, prompts, telemetry, config
 src/worker.py     # queue consumer (horizontal-scale entrypoint)
 src/cli.py        # python -m src.cli run <repo_url>  |  enqueue <repo_url>
-infra/            # Dockerfile, docker-compose, k8s/KEDA sketch, architecture brief
+src/server.py     # FastAPI HTTP trigger for the hosted demo
+infra/            # Dockerfile(s), docker-compose, k8s/KEDA, architecture + railway docs
 test-repo/        # planted-debt dummy repo for the deterministic demo
 ```
 
